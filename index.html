@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>COCOMO estimator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..110,400..800&family=STIX+Two+Text:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --pad: #e9f0e6;      /* engineering-pad green */
+  --sheet: #f8fbf5;
+  --grid: #c3d3c2;
+  --ink: #15281f;
+  --soft: #55685d;
+  --cursor: #2346c8;   /* slide-rule cursor blue */
+  --raise: #b03a16;    /* multiplier above 1 */
+  --lower: #0b7556;    /* multiplier below 1 */
+  --ui: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --math: "STIX Two Text", "Cambria Math", Georgia, serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --pad: #14211b; --sheet: #1b2b24; --grid: #35493e; --ink: #e4eee4; --soft: #9db3a4;
+    --cursor: #8fa6ff; --raise: #f08a62; --lower: #5fd0a8;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--pad); color: var(--ink);
+  font: 400 15px/1.45 var(--ui); font-variant-numeric: tabular-nums;
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px; background-attachment: fixed;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px 72px; }
+header { padding: 40px 0 24px; }
+h1 { font: 800 clamp(34px, 6vw, 60px)/0.95 var(--ui); font-stretch: 75%; letter-spacing: -0.01em; margin: 0 0 10px; }
+header p { margin: 0; max-width: 60ch; color: var(--soft); }
+h2 { font: 700 20px/1.2 var(--ui); font-stretch: 85%; margin: 0 0 12px; }
+h3 { font: 600 14px/1.2 var(--ui); color: var(--soft); margin: 20px 0 4px; }
+
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: start; }
+.inputs { display: grid; gap: 16px; min-width: 0; }
+.sheet { background: var(--sheet); border: 1px solid var(--grid); border-radius: 3px; padding: 20px; }
+aside { position: sticky; top: 16px; display: grid; gap: 16px; }
+
+/* model picker */
+.models { display: grid; grid-template-columns: 2fr 3fr; gap: 16px; }
+fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+legend { font: 700 20px/1.2 var(--ui); font-stretch: 85%; padding: 0; margin-bottom: 8px; }
+.seg { display: flex; flex-wrap: wrap; border: 1px solid var(--ink); border-radius: 3px; overflow: hidden; }
+.seg label { flex: 1 1 auto; text-align: center; cursor: pointer; }
+.seg label + label { border-left: 1px solid var(--ink); }
+.seg span { display: block; padding: 9px 12px; font-weight: 600; white-space: nowrap; }
+.seg input:checked + span { background: var(--ink); color: var(--sheet); }
+input[type=radio] { position: absolute; opacity: 0; pointer-events: none; }
+input[type=radio]:focus-visible + span { outline: 2px solid var(--cursor); outline-offset: -3px; }
+.hint { color: var(--soft); font-size: 13.5px; margin: 8px 0 0; max-width: 70ch; }
+
+/* fields */
+.fields { display: flex; flex-wrap: wrap; gap: 16px 20px; align-items: end; }
+.field { display: grid; gap: 4px; font-weight: 600; font-size: 13.5px; }
+.field input, .field select {
+  font: 500 17px var(--ui); font-variant-numeric: tabular-nums; color: var(--ink); background: var(--pad);
+  border: 1px solid var(--grid); border-bottom: 2px solid var(--ink); border-radius: 2px; padding: 7px 9px; width: 150px;
+}
+.field select { width: auto; max-width: 100%; }
+.field input:focus-visible, .field select:focus-visible, button:focus-visible { outline: 2px solid var(--cursor); outline-offset: 2px; }
+table.op { border-collapse: collapse; margin-bottom: 16px; }
+.op th, .op td { padding: 4px 12px 4px 0; text-align: left; font-size: 13.5px; }
+.op thead th { color: var(--soft); font-weight: 500; }
+.op input { width: 84px; font: 500 16px var(--ui); color: var(--ink); background: var(--pad); border: 1px solid var(--grid); border-bottom: 2px solid var(--ink); border-radius: 2px; padding: 5px 7px; }
+.op small { color: var(--soft); font-weight: 400; }
+
+/* rating strips: a fixed scale with a cursor, like a slide rule */
+.head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+button.reset { font: 600 13.5px var(--ui); color: var(--cursor); background: none; border: 0; padding: 4px 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.drv { display: grid; grid-template-columns: minmax(0, 1fr) auto 52px; gap: 12px; align-items: center; padding: 6px 0; border-top: 1px solid var(--grid); }
+.drv-name { min-width: 0; line-height: 1.25; }
+.drv-name b { font-weight: 700; font-stretch: 85%; margin-right: 8px; }
+.drv-name span { color: var(--soft); font-size: 13.5px; }
+.strip { display: grid; grid-auto-flow: column; grid-auto-columns: 40px; }
+.strip label, .strip i { position: relative; height: 32px; display: grid; place-items: center; }
+.strip label { cursor: pointer; }
+.strip i::before, .strip label::before { content: ""; position: absolute; left: 0; right: 0; bottom: 5px; border-bottom: 1px solid var(--grid); }
+.strip label::before { border-color: var(--ink); }
+.strip label span { position: relative; font-size: 12.5px; font-weight: 600; color: var(--soft); width: 100%; height: 100%; display: grid; place-items: center; border: 2px solid transparent; border-radius: 2px; }
+.strip label:hover span { color: var(--ink); }
+.strip input:checked + span { color: var(--cursor); border-color: var(--cursor); background: color-mix(in srgb, var(--cursor) 10%, transparent); }
+.drv output { text-align: right; font-weight: 700; color: var(--soft); }
+.drv output.up { color: var(--raise); }
+.drv output.down { color: var(--lower); }
+
+/* results */
+.figures dl { margin: 0; }
+.figures div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 7px 0; border-top: 1px solid var(--grid); }
+.figures div:first-child { border-top: 0; padding-top: 0; }
+.figures dt { color: var(--soft); }
+.figures dd { margin: 0; font-weight: 700; font-size: 18px; text-align: right; }
+.figures dd small { font-weight: 400; font-size: 13px; color: var(--soft); margin-left: 4px; }
+.figures div:first-child dd { font-size: 40px; font-weight: 800; font-stretch: 75%; line-height: 1; color: var(--cursor); }
+.error { color: var(--raise); font-weight: 600; margin: 0; }
+.working p { font: 400 17px/1.5 var(--math); margin: 0 0 2px; overflow-wrap: anywhere; }
+.working p.eq { padding-left: 1.6em; color: var(--soft); }
+.working p.eq:last-of-type { color: var(--ink); font-weight: 600; }
+.working var { font-style: italic; }
+.working sup { font-size: 0.7em; line-height: 0; }
+.working .note { font: 400 13.5px/1.45 var(--ui); color: var(--soft); margin-top: 10px; }
+[hidden] { display: none !important; }
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  aside { display: contents; }
+  .figures { position: sticky; top: 0; z-index: 2; order: -1; padding: 12px 16px; margin: 0 -16px; border-width: 0 0 1px; border-radius: 0; }
+  .figures h2 { display: none; }
+  .figures dl { display: grid; grid-template-columns: repeat(3, auto); gap: 4px 16px; justify-content: space-between; }
+  .figures div { display: block; border: 0; padding: 0; }
+  .figures div:nth-child(n+4) { display: none; }
+  .figures dt { font-size: 12.5px; }
+  .figures dd, .figures div:first-child dd { font-size: 22px; text-align: left; font-stretch: 85%; font-weight: 700; }
+  .models { grid-template-columns: 1fr; }
+  .drv { grid-template-columns: minmax(0, 1fr) 48px; gap: 2px 8px; }
+  .drv-name { grid-column: 1 / -1; }
+  .strip { grid-auto-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>COCOMO estimator</h1>
+    <p>Effort, schedule and cost for a software project, from its size and a few ratings. Every result updates as you type, with the arithmetic shown.</p>
+  </header>
+
+  <div class="layout">
+    <div class="inputs">
+      <section class="sheet">
+        <div class="models">
+          <fieldset>
+            <legend>COCOMO 81</legend>
+            <div class="seg">
+              <label><input type="radio" name="model" value="b81"><span>Basic</span></label>
+              <label><input type="radio" name="model" value="i81"><span>Intermediate</span></label>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>COCOMO II</legend>
+            <div class="seg">
+              <label><input type="radio" name="model" value="ac"><span>Application composition</span></label>
+              <label><input type="radio" name="model" value="ed"><span>Early design</span></label>
+              <label><input type="radio" name="model" value="pa" checked><span>Post-architecture</span></label>
+            </div>
+          </fieldset>
+        </div>
+        <p class="hint" id="modelHint"></p>
+      </section>
+
+      <section class="sheet" id="sizeBlock">
+        <h2>Size</h2>
+        <div class="fields">
+          <label class="field">Measured in
+            <select id="method">
+              <option value="kloc">Thousands of source lines</option>
+              <option value="fp">Function points</option>
+            </select>
+          </label>
+          <label class="field" data-m="kloc">Size, KSLOC
+            <input id="kloc" type="number" min="0" step="any" value="32" inputmode="decimal">
+          </label>
+          <label class="field" data-m="fp">Unadjusted function points
+            <input id="ufp" type="number" min="0" step="any" value="600" inputmode="decimal">
+          </label>
+          <label class="field" data-m="fp">Language
+            <select id="lang"></select>
+          </label>
+          <label class="field" data-m="fp">Lines per function point
+            <input id="ratio" type="number" min="0" step="any" value="53" inputmode="decimal">
+          </label>
+        </div>
+      </section>
+
+      <section class="sheet" id="opBlock" hidden>
+        <h2>Object points</h2>
+        <table class="op">
+          <thead><tr><th></th><th>Simple</th><th>Medium</th><th>Difficult</th></tr></thead>
+          <tbody>
+            <tr><th>Screens <small>× 1, 2, 3</small></th>
+              <td><input type="number" min="0" id="s1" value="6" aria-label="Simple screens"></td>
+              <td><input type="number" min="0" id="s2" value="4" aria-label="Medium screens"></td>
+              <td><input type="number" min="0" id="s3" value="2" aria-label="Difficult screens"></td></tr>
+            <tr><th>Reports <small>× 2, 5, 8</small></th>
+              <td><input type="number" min="0" id="r1" value="3" aria-label="Simple reports"></td>
+              <td><input type="number" min="0" id="r2" value="2" aria-label="Medium reports"></td>
+              <td><input type="number" min="0" id="r3" value="1" aria-label="Difficult reports"></td></tr>
+            <tr><th>3GL components <small>× 10</small></th>
+              <td></td><td></td>
+              <td><input type="number" min="0" id="g3" value="2" aria-label="3GL components"></td></tr>
+          </tbody>
+        </table>
+        <div class="fields">
+          <label class="field">Reuse, %
+            <input id="reuse" type="number" min="0" max="100" step="any" value="20" inputmode="decimal">
+          </label>
+        </div>
+      </section>
+
+      <section class="sheet" id="modeBlock" hidden>
+        <fieldset>
+          <legend>Project class</legend>
+          <div class="seg">
+            <label><input type="radio" name="mode" value="organic" checked><span>Organic</span></label>
+            <label><input type="radio" name="mode" value="semi"><span>Semi-detached</span></label>
+            <label><input type="radio" name="mode" value="embedded"><span>Embedded</span></label>
+          </div>
+        </fieldset>
+        <p class="hint" id="modeHint"></p>
+      </section>
+
+      <section class="sheet" id="driverBlock">
+        <div class="head">
+          <h2 id="driverTitle">Ratings</h2>
+          <button class="reset" id="reset" type="button">Reset ratings to nominal</button>
+        </div>
+        <div id="drivers"></div>
+      </section>
+
+      <section class="sheet">
+        <h2>Cost</h2>
+        <div class="fields">
+          <label class="field">Cost per person-month
+            <input id="rate" type="number" min="0" step="any" value="8000" inputmode="decimal">
+          </label>
+        </div>
+        <p class="hint">Use any currency. One person-month is 152 working hours.</p>
+      </section>
+    </div>
+
+    <aside>
+      <section class="sheet figures" aria-live="polite">
+        <h2>Estimate</h2>
+        <div id="figures"></div>
+      </section>
+      <section class="sheet working">
+        <h2>Working</h2>
+        <div id="working"></div>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<script>
+const R = ['XL', 'VL', 'L', 'N', 'H', 'VH', 'XH'], _ = null;
+const RNAME = { XL: 'Extra low', VL: 'Very low', L: 'Low', N: 'Nominal', H: 'High', VH: 'Very high', XH: 'Extra high' };
+
+// Each driver: [code, name, values for XL VL L N H VH XH]
+const C81 = {
+  basic:    { organic: [2.4, 1.05, 2.5, 0.38], semi: [3.0, 1.12, 2.5, 0.35], embedded: [3.6, 1.20, 2.5, 0.32] },
+  inter:    { organic: [3.2, 1.05, 2.5, 0.38], semi: [3.0, 1.12, 2.5, 0.35], embedded: [2.8, 1.20, 2.5, 0.32] },
+  hint: {
+    organic: 'A small team on a familiar kind of problem, with flexible requirements.',
+    semi: 'A mixed-experience team, with some requirements rigid and some flexible.',
+    embedded: 'Tight hardware, software or operational constraints that the software must fit.'
+  },
+  drivers: [
+    ['Product', [
+      ['RELY', 'Required reliability',            [_, .75, .88, 1, 1.15, 1.40, _]],
+      ['DATA', 'Database size',                   [_, _, .94, 1, 1.08, 1.16, _]],
+      ['CPLX', 'Product complexity',              [_, .70, .85, 1, 1.15, 1.30, 1.65]]]],
+    ['Computer', [
+      ['TIME', 'Execution time constraint',       [_, _, _, 1, 1.11, 1.30, 1.66]],
+      ['STOR', 'Main storage constraint',         [_, _, _, 1, 1.06, 1.21, 1.56]],
+      ['VIRT', 'Virtual machine volatility',      [_, _, .87, 1, 1.15, 1.30, _]],
+      ['TURN', 'Computer turnaround time',        [_, _, .87, 1, 1.07, 1.15, _]]]],
+    ['Personnel', [
+      ['ACAP', 'Analyst capability',              [_, 1.46, 1.19, 1, .86, .71, _]],
+      ['AEXP', 'Applications experience',         [_, 1.29, 1.13, 1, .91, .82, _]],
+      ['PCAP', 'Programmer capability',           [_, 1.42, 1.17, 1, .86, .70, _]],
+      ['VEXP', 'Virtual machine experience',      [_, 1.21, 1.10, 1, .90, _, _]],
+      ['LEXP', 'Language experience',             [_, 1.14, 1.07, 1, .95, _, _]]]],
+    ['Project', [
+      ['MODP', 'Modern programming practices',    [_, 1.24, 1.10, 1, .91, .82, _]],
+      ['TOOL', 'Use of software tools',           [_, 1.24, 1.10, 1, .91, .83, _]],
+      ['SCED', 'Required development schedule',   [_, 1.23, 1.08, 1, 1.04, 1.10, _]]]]
+  ]
+};
+
+// COCOMO II.2000 calibration
+const C2 = {
+  A: 2.94, B: 0.91, C: 3.67, D: 0.28,
+  scedPct: { VL: 75, L: 85, N: 100, H: 130, VH: 160 },
+  prod: { VL: 4, L: 7, N: 13, H: 25, VH: 50 },
+  sf: [
+    ['PREC', 'Precedentedness',                   [_, 6.20, 4.96, 3.72, 2.48, 1.24, 0]],
+    ['FLEX', 'Development flexibility',           [_, 5.07, 4.05, 3.04, 2.03, 1.01, 0]],
+    ['RESL', 'Architecture and risk resolution',  [_, 7.07, 5.65, 4.24, 2.83, 1.41, 0]],
+    ['TEAM', 'Team cohesion',                     [_, 5.48, 4.38, 3.29, 2.19, 1.10, 0]],
+    ['PMAT', 'Process maturity',                  [_, 7.80, 6.24, 4.68, 3.12, 1.56, 0]]],
+  pa: [
+    ['Product', [
+      ['RELY', 'Required reliability',            [_, .82, .92, 1, 1.10, 1.26, _]],
+      ['DATA', 'Database size',                   [_, _, .90, 1, 1.14, 1.28, _]],
+      ['CPLX', 'Product complexity',              [_, .73, .87, 1, 1.17, 1.34, 1.74]],
+      ['RUSE', 'Developed for reuse',             [_, _, .95, 1, 1.07, 1.15, 1.24]],
+      ['DOCU', 'Documentation match to needs',    [_, .81, .91, 1, 1.11, 1.23, _]]]],
+    ['Platform', [
+      ['TIME', 'Execution time constraint',       [_, _, _, 1, 1.11, 1.29, 1.63]],
+      ['STOR', 'Main storage constraint',         [_, _, _, 1, 1.05, 1.17, 1.46]],
+      ['PVOL', 'Platform volatility',             [_, _, .87, 1, 1.15, 1.30, _]]]],
+    ['Personnel', [
+      ['ACAP', 'Analyst capability',              [_, 1.42, 1.19, 1, .85, .71, _]],
+      ['PCAP', 'Programmer capability',           [_, 1.34, 1.15, 1, .88, .76, _]],
+      ['PCON', 'Personnel continuity',            [_, 1.29, 1.12, 1, .90, .81, _]],
+      ['APEX', 'Applications experience',         [_, 1.22, 1.10, 1, .88, .81, _]],
+      ['PLEX', 'Platform experience',             [_, 1.19, 1.09, 1, .91, .85, _]],
+      ['LTEX', 'Language and tool experience',    [_, 1.20, 1.09, 1, .91, .84, _]]]],
+    ['Project', [
+      ['TOOL', 'Use of software tools',           [_, 1.17, 1.09, 1, .90, .78, _]],
+      ['SITE', 'Multisite development',           [_, 1.22, 1.09, 1, .93, .86, .80]],
+      ['SCED', 'Required development schedule',   [_, 1.43, 1.14, 1, 1, 1, _]]]]
+  ],
+  ed: [
+    ['Effort multipliers', [
+      ['RCPX', 'Product reliability and complexity', [.49, .60, .83, 1, 1.33, 1.91, 2.72]],
+      ['RUSE', 'Developed for reuse',             [_, _, .95, 1, 1.07, 1.15, 1.24]],
+      ['PDIF', 'Platform difficulty',             [_, _, .87, 1, 1.29, 1.81, 2.61]],
+      ['PERS', 'Personnel capability',            [2.12, 1.62, 1.26, 1, .83, .63, .50]],
+      ['PREX', 'Personnel experience',            [1.59, 1.33, 1.22, 1, .87, .74, .62]],
+      ['FCIL', 'Facilities',                      [1.43, 1.30, 1.10, 1, .87, .73, .62]],
+      ['SCED', 'Required development schedule',   [_, 1.43, 1.14, 1, 1, 1, _]]]]
+  ],
+  ac: [
+    ['Productivity', [
+      ['PROD', 'Developer experience and tool maturity', [_, 4, 7, 13, 25, 50, _]]]]
+  ]
+};
+
+const LANGS = [['Java', 53], ['C++', 55], ['C', 128], ['Ada 95', 49], ['COBOL', 91], ['Fortran 77', 107], ['Pascal', 91], ['Lisp', 64], ['Perl', 27], ['Visual Basic', 29], ['HTML', 15], ['Assembly', 320], ['Other', 0]];
+
+const HINTS = {
+  b81: 'Boehm’s 1981 model at its simplest: effort depends only on size and project class. Good for a first rough figure.',
+  i81: 'The 1981 model with fifteen cost drivers that scale the basic estimate up or down.',
+  ac: 'For prototypes and tool-built applications. Size is counted in screens, reports and components instead of lines.',
+  ed: 'For early in a project, when the architecture is still open. Seven combined multipliers and five scale factors.',
+  pa: 'For when the architecture is settled. Seventeen multipliers and five scale factors, calibrated as COCOMO II.2000.'
+};
+
+const S = { model: 'pa', mode: 'organic', r: { i81: {}, sf: {}, pa: {}, ed: {}, ac: {} } };
+const $ = id => document.getElementById(id);
+const num = id => { const v = parseFloat($(id).value); return isFinite(v) && v > 0 ? v : 0; };
+const f = (n, d = 2) => n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+const rating = (key, code) => S.r[key][code] || 'N';
+const val = (key, d) => d[2][R.indexOf(rating(key, d[0]))];
+
+// Driver groups shown for the current model, as [stateKey, title, drivers, kind]
+function groups() {
+  const g = (key, list) => list.map(([title, ds]) => [key, title, ds, 'em']);
+  const sf = [['sf', 'Scale factors', C2.sf, 'sf']];
+  return { b81: [], i81: g('i81', C81.drivers), ac: g('ac', C2.ac), ed: [...sf, ...g('ed', C2.ed)], pa: [...sf, ...g('pa', C2.pa)] }[S.model];
+}
+
+function renderDrivers() {
+  const gs = groups();
+  $('driverBlock').hidden = !gs.length;
+  const cols = R.filter((r, i) => gs.some(g => g[2].some(d => d[2][i] != null)));
+  $('drivers').innerHTML = gs.map(([key, title, ds]) => `<h3>${title}</h3>` + ds.map(([code, name, v]) =>
+    `<div class="drv" role="radiogroup" aria-label="${name}">
+      <div class="drv-name"><b>${code}</b><span>${name}</span></div>
+      <div class="strip">${cols.map(r => v[R.indexOf(r)] == null ? '<i></i>' :
+        `<label title="${RNAME[r]}"><input type="radio" name="${key}.${code}" value="${r}" ${r === rating(key, code) ? 'checked' : ''}><span>${r}</span></label>`).join('')}</div>
+      <output data-k="${key}" data-c="${code}"></output>
+    </div>`).join('')).join('');
+}
+
+function size() {
+  if ($('method').value === 'kloc') return { k: num('kloc'), line: null };
+  const k = num('ufp') * num('ratio') / 1000;
+  return { k, line: `<p><var>Size</var> = ${f(num('ufp'), 0)} FP × ${f(num('ratio'), 0)} ÷ 1000 = ${f(k)} KSLOC</p>` };
+}
+
+function compute() {
+  const m = S.model, out = { lines: [], unit: 'SLOC' };
+  const eq = (...xs) => xs.forEach((x, i) => out.lines.push(`<p${i ? ' class="eq"' : ''}>${i ? '= ' : ''}${x}</p>`));
+
+  if (m === 'ac') {
+    const op = num('s1') + 2 * num('s2') + 3 * num('s3') + 2 * num('r1') + 5 * num('r2') + 8 * num('r3') + 10 * num('g3');
+    const reuse = Math.min(num('reuse'), 100), nop = op * (100 - reuse) / 100, prod = val('ac', C2.ac[0][1][0]);
+    if (!nop) return { error: 'Count at least one screen, report or component, with reuse below 100%.' };
+    out.effort = nop / prod; out.sizeUnits = nop; out.unit = 'NOP';
+    eq(`<var>NOP</var> = <var>OP</var> × (100 − <var>reuse</var>) ÷ 100`, `${f(op, 0)} × ${f(100 - reuse, 0)} ÷ 100`, `${f(nop, 1)} new object points`);
+    eq(`<var>PM</var> = <var>NOP</var> ÷ <var>PROD</var>`, `${f(nop, 1)} ÷ ${prod}`, `${f(out.effort, 1)} person-months`);
+    out.note = 'Application composition estimates effort only. Use early design or post-architecture for a schedule.';
+    return out;
+  }
+
+  const sz = size(), k = sz.k;
+  if (!k) return { error: 'Enter a size above 0 to get an estimate.' };
+  if (sz.line) out.lines.push(sz.line);
+  out.sizeUnits = k * 1000;
+
+  if (m === 'b81' || m === 'i81') {
+    const [a, b, c, d] = C81[m === 'b81' ? 'basic' : 'inter'][S.mode];
+    let eaf = 1;
+    if (m === 'i81') {
+      C81.drivers.forEach(g => g[1].forEach(dr => eaf *= val('i81', dr)));
+      out.effort = a * k ** b * eaf;
+      eq(`<var>E</var> = <var>a</var> × <var>KLOC</var><sup><var>b</var></sup> × <var>EAF</var>`, `${a} × ${f(k)}<sup>${b}</sup> × ${f(eaf, 3)}`, `${f(out.effort, 1)} person-months`);
+    } else {
+      out.effort = a * k ** b;
+      eq(`<var>E</var> = <var>a</var> × <var>KLOC</var><sup><var>b</var></sup>`, `${a} × ${f(k)}<sup>${b}</sup>`, `${f(out.effort, 1)} person-months`);
+    }
+    out.tdev = c * out.effort ** d;
+    eq(`<var>T</var> = <var>c</var> × <var>E</var><sup><var>d</var></sup>`, `${c} × ${f(out.effort, 1)}<sup>${d}</sup>`, `${f(out.tdev, 1)} months`);
+    return out;
+  }
+
+  // COCOMO II early design and post-architecture
+  const sum = C2.sf.reduce((t, d) => t + val('sf', d), 0), E = C2.B + 0.01 * sum;
+  let em = 1, emNS = 1;
+  C2[m].forEach(g => g[1].forEach(d => { const v = val(m, d); em *= v; if (d[0] !== 'SCED') emNS *= v; }));
+  const pct = C2.scedPct[rating(m, 'SCED')], pmNS = C2.A * k ** E * emNS, F = C2.D + 0.2 * (E - C2.B);
+  out.effort = C2.A * k ** E * em;
+  out.tdev = C2.C * pmNS ** F * pct / 100;
+  eq(`<var>E</var> = 0.91 + 0.01 × Σ<var>SF</var>`, `0.91 + 0.01 × ${f(sum)}`, f(E, 4));
+  eq(`<var>PM</var> = 2.94 × <var>Size</var><sup><var>E</var></sup> × Π<var>EM</var>`, `2.94 × ${f(k)}<sup>${f(E, 4)}</sup> × ${f(em, 3)}`, `${f(out.effort, 1)} person-months`);
+  eq(`<var>F</var> = 0.28 + 0.2 × (<var>E</var> − 0.91)`, f(F, 4));
+  eq(`<var>TDEV</var> = 3.67 × <var>PM</var><sub>NS</sub><sup><var>F</var></sup> × <var>SCED%</var> ÷ 100`, `3.67 × ${f(pmNS, 1)}<sup>${f(F, 4)}</sup> × ${pct} ÷ 100`, `${f(out.tdev, 1)} months`);
+  out.note = '<var>PM</var><sub>NS</sub> is the effort with the schedule multiplier left out.';
+  return out;
+}
+
+function update() {
+  const m = S.model;
+  $('modelHint').textContent = HINTS[m];
+  $('sizeBlock').hidden = m === 'ac';
+  $('opBlock').hidden = m !== 'ac';
+  $('modeBlock').hidden = m !== 'b81' && m !== 'i81';
+  $('modeHint').textContent = C81.hint[S.mode];
+  $('driverTitle').textContent = m === 'ac' ? 'Productivity rating' : m === 'i81' ? 'Cost drivers' : 'Scale factors and effort multipliers';
+  const fp = $('method').value;
+  document.querySelectorAll('[data-m]').forEach(el => el.hidden = el.dataset.m !== fp);
+
+  const all = Object.fromEntries(groups().flatMap(([key, , ds, kind]) => ds.map(d => [key + '.' + d[0], [d, kind]])));
+  document.querySelectorAll('.drv output').forEach(o => {
+    const [d, kind] = all[o.dataset.k + '.' + o.dataset.c], v = val(o.dataset.k, d);
+    o.textContent = m === 'ac' ? v : f(v);
+    o.className = kind === 'sf' || m === 'ac' ? '' : v > 1 ? 'up' : v < 1 ? 'down' : '';
+  });
+
+  const r = compute();
+  if (r.error) {
+    $('figures').innerHTML = `<p class="error">${r.error}</p>`;
+    $('working').innerHTML = '';
+    return;
+  }
+  const dash = '—', rate = num('rate');
+  const rows = [
+    ['Effort', f(r.effort, 1), 'person-months'],
+    ['Schedule', r.tdev ? f(r.tdev, 1) : dash, r.tdev ? 'months' : ''],
+    ['Average team', r.tdev ? f(r.effort / r.tdev, 1) : dash, r.tdev ? 'people' : ''],
+    ['Cost', rate ? f(r.effort * rate, 0) : dash, ''],
+    ['Productivity', f(r.sizeUnits / r.effort, r.unit === 'NOP' ? 1 : 0), r.unit + ' per person-month']
+  ];
+  $('figures').innerHTML = '<dl>' + rows.map(([t, v, u]) => `<div><dt>${t}</dt><dd>${v}${u ? `<small>${u}</small>` : ''}</dd></div>`).join('') + '</dl>';
+  $('working').innerHTML = r.lines.join('') + (r.note ? `<p class="note">${r.note}</p>` : '');
+}
+
+$('lang').innerHTML = LANGS.map(([n, v]) => `<option value="${v}">${n}${v ? ` (${v})` : ''}</option>`).join('');
+
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.name === 'model') { S.model = t.value; renderDrivers(); }
+  else if (t.name === 'mode') S.mode = t.value;
+  else if (t.id === 'lang') { if (+t.value) $('ratio').value = t.value; }
+  else if (t.type === 'radio') { const [key, code] = t.name.split('.'); S.r[key][code] = t.value; }
+  update();
+});
+document.addEventListener('input', e => { if (e.target.type === 'number') update(); });
+$('reset').addEventListener('click', () => {
+  groups().forEach(([key]) => S.r[key] = {});
+  renderDrivers(); update();
+});
+
+renderDrivers();
+update();
+</script>
+</body>
+</html>
